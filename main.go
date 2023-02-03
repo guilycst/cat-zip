@@ -16,11 +16,17 @@ var unzipedFiles map[string]uint = make(map[string]uint)
 var catFile *os.File
 
 func main() {
-	var dir = flag.String("dir", "./test-assets", "Directory where the zip files are placed")
-	var outdir = flag.String("output", ".", "Directory where the unziped files will be placed")
-	var ext = flag.String("ext", ".zip", "Filter files  by extension")
-	var outdirCatFileName = flag.String("catname", "unknown_blob", "Directory where the unziped files will be placed")
+	var dir = flag.String("dir", ".", "Directory where the input zip files are placed")
+	var outdir = flag.String("outdir", ".", "Directory where the output unziped files will be placed")
+	var ext = flag.String("ext", ".zip", "Filter input files by extension")
+	var outdirCatFileName = flag.String("outfile", "unknown_blob", "Concatenated file containing all of the unziped files content")
+	var help = flag.Bool("help", false, "Show help")
 	flag.Parse()
+
+	if *help {
+		flag.Usage()
+		os.Exit(0)
+	}
 
 	filesInDir := []string{}
 	filepath.WalkDir(*dir, func(path string, d fs.DirEntry, err error) error {
@@ -128,5 +134,7 @@ func copyToFile(f *zip.File, destinationFile *os.File) error {
 	if _, err := io.Copy(destinationFile, zippedFile); err != nil {
 		return err
 	}
+
+	log.Printf("output file at %v", destinationFile.Name())
 	return nil
 }
