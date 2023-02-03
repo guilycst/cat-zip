@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/zip"
+	"compress/gzip"
 	"flag"
 	"fmt"
 	"io"
@@ -18,7 +19,7 @@ var catFile *os.File
 func main() {
 	var dir = flag.String("dir", ".", "Directory where the input zip files are placed")
 	var outdir = flag.String("outdir", ".", "Directory where the output unziped files will be placed")
-	var ext = flag.String("ext", ".zip", "Filter input files by extension")
+	var ext = flag.String("ext", ".gz", "Filter input files by extension: .zip and .gz")
 	var outdirCatFileName = flag.String("outfile", "unknown_blob", "Concatenated file containing all of the unziped files content")
 	var help = flag.Bool("help", false, "Show help")
 	flag.Parse()
@@ -47,9 +48,67 @@ func main() {
 
 	catFilePath := filepath.Join(*outdir, *outdirCatFileName)
 	catFile, _ = os.OpenFile(catFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-
 	defer catFile.Close()
 
+	switch filepath.Ext(*ext) {
+	case ".gz":
+		handleGz(filesInDir, ext, outdir)
+		break
+	default:
+		handleZip(filesInDir, ext, outdir)
+		break
+	}
+
+}
+
+func handleGz(filesInDir []string, ext *string, outdir *string) {
+	for _, gzFilename := range filesInDir {
+
+		newFilename := strings.TrimSuffix(gzFilename, ".gz")
+		newFilename = autoRenameRepeatedFiles(newFilename)
+
+		writer, err := os.Create(newFilename)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer writer.Close()
+
+		err = copyFileGz(gzFilename, newFilename, writer)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		err = copyFileGz(gzFilename, newFilename, catFile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		catFile.WriteString("\n")
+	}
+}
+
+func copyFileGz(gzFilename string, newFilename string, writer io.WriteCloser) error {
+
+	gzFile, err := os.Open(gzFilename)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	defer gzFile.Close()
+
+	reader, err := gzip.NewReader(gzFile)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+
+	if err = ioCopy(newFilename, writer, reader); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func handleZip(filesInDir []string, ext *string, outdir *string) {
 	for _, f := range filesInDir {
 		reader, err := zip.OpenReader(f)
 		if err != nil {
@@ -69,7 +128,19 @@ func main() {
 			}
 		}
 	}
+}
 
+func autoRenameRepeatedFiles(filePath string) string {
+	counter, repeated := unzipedFiles[filePath]
+	if repeated {
+		dir := filepath.Dir(filePath)
+		ext := filepath.Ext(filePath)
+		fileName := filepath.Base(filePath)
+		fileName = fileName[:len(fileName)-len(ext)]
+		fileName = fmt.Sprintf("%s(%d)%s", fileName, counter, ext)
+		filePath = filepath.Join(dir, fileName)
+	}
+	return filePath
 }
 
 func unzipFile(f *zip.File, destination string) error {
@@ -131,10 +202,18 @@ func copyToFile(f *zip.File, destinationFile *os.File) error {
 	}
 	defer zippedFile.Close()
 
-	if _, err := io.Copy(destinationFile, zippedFile); err != nil {
+	if err = ioCopy(destinationFile.Name(), destinationFile, zippedFile); err != nil {
 		return err
 	}
 
 	log.Printf("output file at %v", destinationFile.Name())
+	return nil
+}
+
+func ioCopy(filename string, writer io.Writer, reader io.ReadCloser) error {
+	if _, err := io.Copy(writer, reader); err != nil {
+		return err
+	}
+	log.Printf("output file at %v", filename)
 	return nil
 }
